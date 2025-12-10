@@ -309,7 +309,7 @@ class ProtocolDecoder:
         from scapy.layers.dhcp import DHCP
         from scapy.layers.inet import UDP
         
-        if packet.haslayer(DHCP):
+        if packet.haslayer(DHCP) and packet.haslayer(UDP):
             dhcp = packet.getlayer(DHCP)
             udp = packet.getlayer(UDP)
             

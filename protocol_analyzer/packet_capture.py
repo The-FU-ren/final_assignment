@@ -34,8 +34,23 @@ class PacketCapture:
             )
             return packets
         except Exception as e:
-            print(f"捕获数据包失败: {e}")
-            return []
+            # 尝试使用第3层套接字进行捕获
+            from scapy.all import conf, L3socket
+            print(f"尝试使用第3层套接字进行捕获: {e}")
+            try:
+                # 当没有WinPcap时，直接使用scapy的sniff函数，不指定iface
+                # 并调整超时时间，避免无限等待
+                packets = sniff(
+                    count=count,
+                    filter=filter_rule if filter_rule else "",
+                    store=True,
+                    timeout=5,  # 设置超时时间5秒
+                    lfilter=lambda pkt: True  # 确保捕获所有数据包
+                )
+                return packets
+            except Exception as e2:
+                print(f"使用第3层套接字捕获失败: {e2}")
+                return []
     
     def start_live_capture(self, interface, callback, filter_rule=None):
         """
@@ -62,8 +77,31 @@ class PacketCapture:
                 stop_filter=should_stop
             )
         except Exception as e:
-            print(f"实时捕获失败: {e}")
-            self.is_running = False
+            # 尝试使用第3层套接字进行实时捕获
+            from scapy.all import conf
+            print(f"尝试使用第3层套接字进行实时捕获: {e}")
+            try:
+                # 不指定iface参数，让系统自动处理
+                
+                def packet_handler(packet):
+                    callback(packet)
+                
+                # 使用stop_filter来检查是否需要停止捕获
+                def should_stop(packet):
+                    return not self.is_running
+                
+                # 对于实时捕获，不设置超时，而是依赖stop_filter来停止
+                sniff(
+                    filter=filter_rule if filter_rule else "",
+                    prn=packet_handler,
+                    store=False,
+                    stop_filter=should_stop,
+                    lfilter=lambda pkt: True,  # 确保捕获所有数据包
+                    timeout=0  # 实时捕获不设置超时
+                )
+            except Exception as e2:
+                print(f"使用第3层套接字实时捕获失败: {e2}")
+                self.is_running = False
     
     def stop_live_capture(self):
         """
