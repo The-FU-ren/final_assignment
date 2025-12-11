@@ -8,14 +8,29 @@ class PacketCapture:
         self.is_running = False
     
     def show_interfaces(self):
-        """显示可用的网络接口"""
-        interfaces = get_if_list()
-        for iface in interfaces:
-            print(f"  - {iface}")
+        """显示可用的网络接口，包含友好名称"""
+        from scapy.all import IFACES
+        for name, iface in IFACES.items():
+            # 构建友好的接口名称
+            friendly_name = f"{iface.description} ({name})"
+            if iface.ip:
+                friendly_name += f" - {iface.ip}"
+            print(f"  - {friendly_name}")
     
     def get_if_list(self):
         """获取可用的网络接口列表"""
         return get_if_list()
+    
+    def get_friendly_interfaces(self):
+        """获取友好的网络接口列表，返回字典{friendly_name: actual_name}"""
+        from scapy.all import IFACES
+        friendly_interfaces = {}
+        for name, iface in IFACES.items():
+            friendly_name = f"{iface.description} ({name})"
+            if iface.ip:
+                friendly_name += f" - {iface.ip}"
+            friendly_interfaces[friendly_name] = name
+        return friendly_interfaces
     
     def capture_packets(self, interface, count=10, filter_rule=None):
         """
@@ -26,30 +41,27 @@ class PacketCapture:
         :return: 捕获的数据包列表
         """
         try:
+            # 添加超时参数，确保函数不会无限等待
             packets = sniff(
                 iface=interface,
                 count=count,
                 filter=filter_rule if filter_rule else "",
-                store=True
+                store=True,
+                timeout=count * 2  # 设置超时时间，确保函数不会无限等待
             )
             return packets
         except Exception as e:
-            # 尝试使用第3层套接字进行捕获
-            from scapy.all import conf, L3socket
-            print(f"尝试使用第3层套接字进行捕获: {e}")
+            # 尝试使用备用方法捕获数据包，不指定接口
             try:
-                # 当没有WinPcap时，直接使用scapy的sniff函数，不指定iface
-                # 并调整超时时间，避免无限等待
                 packets = sniff(
                     count=count,
                     filter=filter_rule if filter_rule else "",
                     store=True,
-                    timeout=5,  # 设置超时时间5秒
+                    timeout=min(count * 2, 10),  # 设置最大超时时间10秒
                     lfilter=lambda pkt: True  # 确保捕获所有数据包
                 )
                 return packets
-            except Exception as e2:
-                print(f"使用第3层套接字捕获失败: {e2}")
+            except Exception:
                 return []
     
     def start_live_capture(self, interface, callback, filter_rule=None):

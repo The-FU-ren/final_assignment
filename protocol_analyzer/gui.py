@@ -90,7 +90,7 @@ class ProtocolAnalyzerGUI:
         # 捕获按钮
         ttk.Button(control_frame, text="开始捕获", command=self.start_capture).grid(row=2, column=0, padx=5, pady=5)
         ttk.Button(control_frame, text="停止捕获", command=self.stop_capture).grid(row=2, column=1, padx=5, pady=5)
-        ttk.Button(control_frame, text="清空列表", command=self.clear_packets).grid(row=2, column=2, padx=5, pady=5)
+        ttk.Button(control_frame, text="清空列表", command=lambda: self.clear_packets(clear_original=True)).grid(row=2, column=2, padx=5, pady=5)
         
         # 筛选功能
         ttk.Label(control_frame, text="筛选条件:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=5)
@@ -203,7 +203,7 @@ class ProtocolAnalyzerGUI:
         self.status_var.set(f"正在捕获数据包...")
         
         # 清空之前的数据包
-        self.clear_packets()
+        self.clear_packets(clear_original=True)
         
         # 创建捕获线程
         capture_thread = threading.Thread(
@@ -366,7 +366,7 @@ class ProtocolAnalyzerGUI:
                 self.status_var.set(f"正在读取PCAP文件...")
                 packets = self.storage.read_pcap(file_path)
                 # 先清空，再设置数据包列表
-                self.clear_packets()
+                self.clear_packets(clear_original=True)
                 self.captured_packets = packets
                 self.original_packets = packets.copy()  # 保存原始数据包
                 self.display_captured_packets()
@@ -397,13 +397,18 @@ class ProtocolAnalyzerGUI:
                 messagebox.showerror("保存错误", f"保存PCAP文件失败: {str(e)}")
                 self.status_var.set("保存失败")
     
-    def clear_packets(self):
-        """清空数据包列表"""
+    def clear_packets(self, clear_original=False):
+        """清空数据包列表
+        
+        Args:
+            clear_original: 是否清空原始数据包，默认为False
+        """
         for item in self.packet_tree.get_children():
             self.packet_tree.delete(item)
         self.detail_text.delete(1.0, tk.END)
         self.captured_packets = []
-        self.original_packets = []
+        if clear_original:
+            self.original_packets = []  # 仅在需要时清空原始数据包
         self.packet_count = 0
         self.status_var.set("数据包列表已清空")
     
@@ -473,7 +478,7 @@ class ProtocolAnalyzerGUI:
                     filtered_packets.append(packet)
             
             # 更新数据包列表
-            self.clear_packets()
+            self.clear_packets()  # 保留原始数据包，只清空当前显示的数据包
             self.captured_packets = filtered_packets
             self.display_captured_packets()
             self.status_var.set(f"已筛选出 {len(filtered_packets)} 个数据包")
@@ -486,7 +491,7 @@ class ProtocolAnalyzerGUI:
         # 清空筛选条件文本
         self.filter_text_var.set("")
         # 恢复显示所有原始数据包
-        self.clear_packets()
+        self.clear_packets()  # 保留原始数据包，只清空当前显示的数据包
         self.captured_packets = self.original_packets.copy()
         self.display_captured_packets()
         self.status_var.set(f"已显示所有 {len(self.original_packets)} 个数据包")
