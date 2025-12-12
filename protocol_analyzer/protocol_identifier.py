@@ -45,6 +45,8 @@ class ProtocolIdentifier:
         # 检查网络层协议
         elif self._is_ipv4(packet):
             return "IPv4"
+        elif self._is_ipv6(packet):
+            return "IPv6"
         # 检查数据链路层协议
         elif self._is_arp(packet):
             return "ARP"

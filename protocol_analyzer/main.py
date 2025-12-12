@@ -7,6 +7,7 @@ from protocol_decoder import ProtocolDecoder
 from packet_storage import PacketStorage
 import argparse
 import sys
+import os
 
 def main():
     parser = argparse.ArgumentParser(description='协议分析软件')
@@ -82,9 +83,6 @@ def main():
         return 0  # 成功退出
 
 if __name__ == "__main__":
-    import sys
-    import os
-    
     # 检测是否在调试环境中运行
     is_debug = False
     

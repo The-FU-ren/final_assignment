@@ -49,9 +49,10 @@ class ProtocolDecoder:
         return info
     
     def _decode_ip(self, packet):
-        """解码IP层信息"""
+        """解码IP层信息，支持IPv4和IPv6"""
         info = ""
         from scapy.layers.inet import IP
+        from scapy.layers.inet6 import IPv6
         
         if packet.haslayer(IP):
             ip = packet.getlayer(IP)
@@ -60,6 +61,14 @@ class ProtocolDecoder:
             info += f"IP协议: IPv4\n"
             info += f"TTL: {ip.ttl}\n"
             info += f"总长度: {ip.len}\n"
+        elif packet.haslayer(IPv6):
+            ipv6 = packet.getlayer(IPv6)
+            info += f"源IP: {ipv6.src}\n"
+            info += f"目的IP: {ipv6.dst}\n"
+            info += f"IP协议: IPv6\n"
+            info += f"跳数限制: {ipv6.hlim}\n"
+            info += f"有效负载长度: {ipv6.plen}\n"
+            info += f"下一跳头部: {ipv6.nh}\n"
         return info
     
     def _decode_transport(self, packet):
@@ -100,7 +109,7 @@ class ProtocolDecoder:
         return info
     
     def _decode_http(self, packet):
-        """解码HTTP协议信息"""
+        """解码HTTP协议信息，包括完整的请求/响应体"""
         info = "HTTP协议:\n"
         from scapy.layers.inet import TCP
         
@@ -127,22 +136,58 @@ class ProtocolDecoder:
                             info += f"  响应行: {first_line}\n"
                             if len(first_line.split()) >= 2:
                                 info += f"  状态码: {first_line.split()[1]}\n"
+                                if len(first_line.split()) >= 3:
+                                    info += f"  状态描述: {' '.join(first_line.split()[2:])}\n"
                     
                     # 解析请求头/响应头
+                    headers = {}
+                    body_start = 1
                     info += "  头部信息:\n"
-                    for line in lines[1:]:
+                    for i, line in enumerate(lines[1:]):
                         line = line.strip()
                         if line == '':
                             # 空行表示头部结束
+                            body_start = i + 2
                             break
                         if ': ' in line:
                             key, value = line.split(': ', 1)
+                            headers[key] = value
                             info += f"    {key}: {value}\n"
                             # 提取关键头部信息
                             if key.lower() == 'user-agent':
                                 info += f"    【User-Agent: {value}】\n"
                             elif key.lower() == 'content-type':
                                 info += f"    【Content-Type: {value}】\n"
+                            elif key.lower() == 'content-length':
+                                info += f"    【Content-Length: {value}】\n"
+                    
+                    # 解析请求体/响应体
+                    body = '\n'.join(lines[body_start:]).strip()
+                    if body:
+                        info += "  请求体/响应体:\n"
+                        # 检查内容类型
+                        content_type = headers.get('Content-Type', '')
+                        if 'application/json' in content_type:
+                            # 尝试格式化JSON
+                            try:
+                                import json
+                                json_data = json.loads(body)
+                                formatted_body = json.dumps(json_data, indent=2)
+                                info += f"    {formatted_body[:500]}\n"  # 只显示前500个字符
+                                if len(formatted_body) > 500:
+                                    info += f"    ... (内容过长，已截断)\n"
+                            except:
+                                info += f"    {body[:500]}\n"  # 只显示前500个字符
+                                if len(body) > 500:
+                                    info += f"    ... (内容过长，已截断)\n"
+                        elif 'text/' in content_type:
+                            # 文本内容，直接显示
+                            info += f"    {body[:500]}\n"  # 只显示前500个字符
+                            if len(body) > 500:
+                                info += f"    ... (内容过长，已截断)\n"
+                        else:
+                            # 二进制内容，显示长度
+                            info += f"    【二进制数据，长度: {len(body)} 字节】\n"
                     
                 except Exception as e:
                     info += f"  解析HTTP数据失败: {e}\n"
