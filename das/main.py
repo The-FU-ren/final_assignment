@@ -4,12 +4,16 @@ from train import run_experiments
 from visualization import (
     plot_training_curves,
     plot_snr_vs_accuracy,
-    generate_report
+    generate_report,
+    create_result_directories
 )
 
 def main():
     """主函数，协调整个实验流程"""
     print("开始 DRSN-NTF 模型复现实验...")
+    
+    # 创建结果文件夹结构
+    create_result_directories()
     
     # 设置实验参数
     snr_values = [0, 1, 2, 3, 4, 5]  # 不同信噪比

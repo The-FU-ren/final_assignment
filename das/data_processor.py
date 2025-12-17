@@ -30,19 +30,74 @@ def add_noise(data, snr_db):
     noise = np.random.normal(0, np.sqrt(noise_power), data.shape)
     return data + noise
 
-def load_data(data_path=None):
-    """加载数据集，这里假设数据已经预处理为numpy数组"""
-    # 实际使用时，需要替换为真实数据加载逻辑
-    # 这里生成模拟数据作为示例
-    num_samples = 1000
-    signal_length = 8000
-    num_classes = 6
+def load_data(data_path=r"G:\gitcode\das_small_dataset_N50_20241230_154821.h5"):
+    """加载H5数据集"""
+    import h5py
+    import numpy as np
     
-    # 生成模拟数据
-    data = np.random.randn(num_samples, signal_length)
-    labels = np.random.randint(0, num_classes, num_samples)
+    print(f"Loading dataset from: {data_path}")
     
-    return data, labels
+    with h5py.File(data_path, 'r') as f:
+        # 查看数据集结构
+        print("Dataset structure:")
+        def print_attrs(name, obj):
+            print(f"{name}")
+            if isinstance(obj, h5py.Dataset):
+                print(f"  Shape: {obj.shape}")
+                print(f"  Dtype: {obj.dtype}")
+        f.visititems(print_attrs)
+        
+        # 检查是否包含train组
+        if 'train' in f:
+            print("\nLoading train data...")
+            train_group = f['train']
+            
+            # 读取训练数据
+            int_data = train_group['int_data']
+            labels = train_group['labels'][:]
+            
+            # 转换数据格式
+            num_samples = len(int_data)
+            print(f"Found {num_samples} samples in train dataset")
+            
+            # 初始化数据数组
+            # 假设每个样本长度为8000，根据实际情况调整
+            signal_length = 8000
+            data = np.zeros((num_samples, signal_length))
+            
+            # 读取每个样本
+            for i, key in enumerate(int_data.keys()):
+                sample_data = int_data[key][:]
+                # 如果样本长度超过8000，截断；如果不足，补零
+                if len(sample_data) >= signal_length:
+                    data[i] = sample_data[:signal_length]
+                else:
+                    data[i, :len(sample_data)] = sample_data
+            
+            print(f"Loaded data shape: {data.shape}")
+            print(f"Loaded labels shape: {labels.shape}")
+            
+            return data, labels
+        else:
+            # 直接读取根级别的数据（如果数据集没有train组）
+            print("\nLoading data from root level...")
+            data = f['int_data'][:]
+            labels = f['labels'][:]
+            
+            # 确保数据形状符合要求 (样本数, 8000)
+            if data.ndim == 2 and data.shape[1] > 8000:
+                # 如果每个样本长度超过8000，截断
+                data = data[:, :8000]
+            elif data.ndim == 1:
+                # 如果是一维数据，重塑为 (1, len(data))
+                data = data.reshape(1, -1)
+                if data.shape[1] > 8000:
+                    data = data[:, :8000]
+            
+            print(f"Loaded data shape: {data.shape}")
+            print(f"Loaded labels shape: {labels.shape}")
+            
+            return data, labels
 
 def preprocess_data(data, snr_db=0, normalize=True):
     """数据预处理"""

@@ -1,0 +1,34 @@
+DRSN-NTF 实验报告
+==================================================
+
+SNR = 0dB
+------------------------------
+Average Best Accuracy: 0.5500
+Average Final Accuracy: 0.4167
+
+SNR = 1dB
+------------------------------
+Average Best Accuracy: 0.3750
+Average Final Accuracy: 0.3417
+
+SNR = 2dB
+------------------------------
+Average Best Accuracy: 0.4417
+Average Final Accuracy: 0.3583
+
+SNR = 3dB
+------------------------------
+Average Best Accuracy: 0.4083
+Average Final Accuracy: 0.3167
+
+SNR = 4dB
+------------------------------
+Average Best Accuracy: 0.4583
+Average Final Accuracy: 0.3583
+
+SNR = 5dB
+------------------------------
+Average Best Accuracy: 0.4250
+Average Final Accuracy: 0.3417
+
+Average Accuracy Across All SNRs: 0.3556

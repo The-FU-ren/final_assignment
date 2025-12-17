@@ -96,7 +96,7 @@ def train_model(snr_db=0, batch_size=128, epochs=100, num_classes=6):
         
         # 定义损失函数和优化器
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0001)
+        optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=0.0001)
         
         # 获取学习率调度器
         scheduler = get_lr_scheduler(optimizer, epochs)
@@ -191,5 +191,5 @@ if __name__ == "__main__":
     results = run_experiments()
     
     # 保存结果
-    np.save('experiment_results.npy', results)
-    print("\nExperiment results saved to experiment_results.npy")
+    np.save('results/data/experiment_results.npy', results)
+    print("\nExperiment results saved to results/data/experiment_results.npy")

@@ -8,9 +8,26 @@ class NewThresholdFunction(nn.Module):
         self.N = N
     
     def forward(self, x, tau):
+        # 确保tau是正值
+        tau = torch.abs(tau)
+        
+        # 添加一个小的正值，确保tau不会为0
+        tau = tau + 1e-10
+        
+        # 计算掩码
         mask = torch.abs(x) > tau
-        y = torch.sign(x) * (torch.abs(x) - tau) * torch.exp(-self.N * tau / (torch.abs(x) + 1e-8))
+        
+        # 安全计算，避免数值问题
+        abs_x = torch.abs(x) + 1e-10
+        exp_term = torch.exp(-self.N * tau / abs_x)
+        y = torch.sign(x) * (abs_x - tau) * exp_term
+        
+        # 应用掩码
         y = y * mask.float()
+        
+        # 确保输出没有nan或inf值
+        y = torch.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
+        
         return y
 
 class RSBU_NTF(nn.Module):
@@ -32,6 +49,19 @@ class RSBU_NTF(nn.Module):
         
         # 新阈值函数
         self.new_threshold = NewThresholdFunction()
+        
+        # 初始化权重
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0)
         
         # 捷径连接
         if self.downsample or in_channels != out_channels:

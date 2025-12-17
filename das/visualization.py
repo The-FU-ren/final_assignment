@@ -2,6 +2,26 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
+import os
+
+# 创建结果文件夹结构
+def create_result_directories():
+    """创建结果文件夹结构"""
+    directories = [
+        'results',
+        'results/figures',
+        'results/figures/training_curves',
+        'results/figures/performance',
+        'results/figures/confusion_matrices',
+        'results/figures/f1_scores',
+        'results/reports',
+        'results/data'
+    ]
+    
+    for directory in directories:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            print(f"Created directory: {directory}")
 
 def plot_training_curves(fold_results, snr_db=0):
     """绘制训练曲线"""
@@ -29,7 +49,7 @@ def plot_training_curves(fold_results, snr_db=0):
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     
-    plt.savefig(f'training_curves_{snr_db}dB.png')
+    plt.savefig(f'results/figures/training_curves/training_curves_{snr_db}dB.png')
     plt.close()
 
 def plot_snr_vs_accuracy(all_results):
@@ -50,7 +70,7 @@ def plot_snr_vs_accuracy(all_results):
     plt.xticks(snr_values)
     plt.ylim(0, 1)
     
-    plt.savefig('snr_vs_accuracy.png')
+    plt.savefig('results/figures/performance/snr_vs_accuracy.png')
     plt.close()
 
 def plot_confusion_matrix(y_true, y_pred, classes, snr_db=0):
@@ -64,7 +84,7 @@ def plot_confusion_matrix(y_true, y_pred, classes, snr_db=0):
     plt.ylabel('True Label')
     plt.tight_layout()
     
-    plt.savefig(f'confusion_matrix_{snr_db}dB.png')
+    plt.savefig(f'results/figures/confusion_matrices/confusion_matrix_{snr_db}dB.png')
     plt.close()
 
 def plot_f1_scores(f1_scores, classes, snr_db=0):
@@ -82,7 +102,7 @@ def plot_f1_scores(f1_scores, classes, snr_db=0):
         plt.text(i, v + 0.01, f'{v:.3f}', ha='center')
     
     plt.tight_layout()
-    plt.savefig(f'f1_scores_{snr_db}dB.png')
+    plt.savefig(f'results/figures/f1_scores/f1_scores_{snr_db}dB.png')
     plt.close()
 
 def plot_model_comparison(results_dict, snr_values):
@@ -101,12 +121,12 @@ def plot_model_comparison(results_dict, snr_values):
     plt.xticks(snr_values)
     plt.ylim(0, 1)
     
-    plt.savefig('model_comparison.png')
+    plt.savefig('results/figures/performance/model_comparison.png')
     plt.close()
 
 def generate_report(all_results):
     """生成实验报告"""
-    with open('experiment_report.txt', 'w') as f:
+    with open('results/reports/experiment_report.txt', 'w') as f:
         f.write('DRSN-NTF 实验报告\n')
         f.write('='*50 + '\n\n')
         
