@@ -31,15 +31,25 @@ class NewThresholdFunction(nn.Module):
         return y
 
 class RSBU_NTF(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, downsample=False):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, downsample=False, threshold_N=1.0, dropout=0.0, use_batchnorm=True):
         super(RSBU_NTF, self).__init__()
         self.downsample = downsample
+        self.dropout = dropout
+        self.use_batchnorm = use_batchnorm
         
-        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=1)
-        self.bn1 = nn.BatchNorm1d(out_channels)
+        # 计算padding，确保卷积输出的长度与输入长度匹配（当stride=1时）
+        padding = kernel_size // 2
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=padding)
+        if use_batchnorm:
+            self.bn1 = nn.BatchNorm1d(out_channels)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, stride=1, padding=1)
-        self.bn2 = nn.BatchNorm1d(out_channels)
+        if dropout > 0:
+            self.dropout1 = nn.Dropout(dropout)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, stride=1, padding=padding)
+        if use_batchnorm:
+            self.bn2 = nn.BatchNorm1d(out_channels)
+        if dropout > 0:
+            self.dropout2 = nn.Dropout(dropout)
         
         # 特殊阈值模块
         self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
@@ -48,7 +58,7 @@ class RSBU_NTF(nn.Module):
         self.sigmoid = nn.Sigmoid()
         
         # 新阈值函数
-        self.new_threshold = NewThresholdFunction()
+        self.new_threshold = NewThresholdFunction(N=threshold_N)
         
         # 初始化权重
         for m in self.modules():
@@ -76,11 +86,15 @@ class RSBU_NTF(nn.Module):
         residual = self.shortcut(x)
         
         out = self.conv1(x)
-        out = self.bn1(out)
+        if self.use_batchnorm:
+            out = self.bn1(out)
         out = self.relu(out)
+        if self.dropout > 0:
+            out = self.dropout1(out)
         
         out = self.conv2(out)
-        out = self.bn2(out)
+        if self.use_batchnorm:
+            out = self.bn2(out)
         
         # 计算自适应阈值
         alpha = self.global_avg_pool(out).squeeze(-1)  # (batch, channels)
@@ -92,46 +106,80 @@ class RSBU_NTF(nn.Module):
         # 应用新阈值函数
         out = self.new_threshold(out, tau.unsqueeze(-1))
         
+        # 确保out和residual大小匹配
+        if out.size(2) != residual.size(2):
+            # 使用自适应池化调整out大小以匹配residual
+            out = nn.functional.adaptive_avg_pool1d(out, residual.size(2))
+        
         out += residual
         out = self.relu(out)
+        if self.dropout > 0:
+            out = self.dropout2(out)
         
         return out
 
 class DRSN_NTF(nn.Module):
-    def __init__(self, num_classes=6):
+    def __init__(self, num_classes=6, initial_channels=8, depth=34, kernel_size=3, 
+                 threshold_N=1.0, dropout=0.2, use_batchnorm=True):
         super(DRSN_NTF, self).__init__()
+        self.initial_channels = initial_channels
+        self.depth = depth
+        self.kernel_size = kernel_size
+        self.threshold_N = threshold_N
+        self.dropout = dropout
+        self.use_batchnorm = use_batchnorm
         
-        # 输入层: 1×8000×1 -> 4×2000×1
-        self.layer1_down = RSBU_NTF(1, 4, kernel_size=3, stride=2, downsample=True)
-        self.layer1 = RSBU_NTF(4, 4, kernel_size=3)
+        # 计算每个阶段的RSBU-NTF单元数量
+        layers_per_stage = depth // 3
+        channels = [initial_channels, initial_channels*2, initial_channels*4]
         
-        # 特征提取阶段2: 4×2000×1 -> 8×1000×1
-        self.layer2_down = RSBU_NTF(4, 8, kernel_size=3, stride=2, downsample=True)
-        self.layer2 = RSBU_NTF(8, 8, kernel_size=3)
+        # 网络层次列表，用于动态构建网络
+        self.network = nn.ModuleList()
         
-        # 特征提取阶段3: 8×1000×1 -> 16×500×1
-        self.layer3_down = RSBU_NTF(8, 16, kernel_size=3, stride=2, downsample=True)
-        self.layer3 = RSBU_NTF(16, 16, kernel_size=3)
+        # 输入层：1×8000×1 -> initial_channels×4000×1
+        self.network.append(RSBU_NTF(1, channels[0], kernel_size=kernel_size, stride=2, 
+                                    downsample=True, threshold_N=threshold_N, 
+                                    dropout=dropout, use_batchnorm=use_batchnorm))
+        # 添加第一个阶段的剩余RSBU-NTF单元
+        for _ in range(layers_per_stage - 1):
+            self.network.append(RSBU_NTF(channels[0], channels[0], kernel_size=kernel_size, 
+                                        threshold_N=threshold_N, dropout=dropout, 
+                                        use_batchnorm=use_batchnorm))
+        
+        # 第二个阶段：channels[0]×4000×1 -> channels[1]×2000×1
+        self.network.append(RSBU_NTF(channels[0], channels[1], kernel_size=kernel_size, stride=2, 
+                                    downsample=True, threshold_N=threshold_N, 
+                                    dropout=dropout, use_batchnorm=use_batchnorm))
+        # 添加第二个阶段的剩余RSBU-NTF单元
+        for _ in range(layers_per_stage - 1):
+            self.network.append(RSBU_NTF(channels[1], channels[1], kernel_size=kernel_size, 
+                                        threshold_N=threshold_N, dropout=dropout, 
+                                        use_batchnorm=use_batchnorm))
+        
+        # 第三个阶段：channels[1]×2000×1 -> channels[2]×1000×1
+        self.network.append(RSBU_NTF(channels[1], channels[2], kernel_size=kernel_size, stride=2, 
+                                    downsample=True, threshold_N=threshold_N, 
+                                    dropout=dropout, use_batchnorm=use_batchnorm))
+        # 添加第三个阶段的剩余RSBU-NTF单元
+        for _ in range(layers_per_stage - 1):
+            self.network.append(RSBU_NTF(channels[2], channels[2], kernel_size=kernel_size, 
+                                        threshold_N=threshold_N, dropout=dropout, 
+                                        use_batchnorm=use_batchnorm))
         
         # 全局均值池化
         self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
         
         # 全连接层
-        self.fc = nn.Linear(16, num_classes)
+        self.fc = nn.Linear(channels[2], num_classes)
     
     def forward(self, x):
         # x shape: (batch, 1, 8000)
         
-        out = self.layer1_down(x)
-        out = self.layer1(out)
+        out = x
+        for layer in self.network:
+            out = layer(out)
         
-        out = self.layer2_down(out)
-        out = self.layer2(out)
-        
-        out = self.layer3_down(out)
-        out = self.layer3(out)
-        
-        out = self.global_avg_pool(out).squeeze(-1)  # (batch, 16)
+        out = self.global_avg_pool(out).squeeze(-1)  # (batch, channels[2])
         out = self.fc(out)  # (batch, num_classes)
         
         return out

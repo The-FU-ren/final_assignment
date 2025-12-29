@@ -3,25 +3,55 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
 import os
+import time
+
+# 生成唯一的运行ID，用于区分不同的训练结果
+def generate_run_id():
+    """生成唯一的运行ID"""
+    return time.strftime("%Y%m%d_%H%M%S")
+
+# 当前运行ID
+RUN_ID = generate_run_id()
 
 # 创建结果文件夹结构
 def create_result_directories():
     """创建结果文件夹结构"""
+    # 基础目录结构
     directories = [
-        'results',
-        'results/figures',
-        'results/figures/training_curves',
-        'results/figures/performance',
-        'results/figures/confusion_matrices',
-        'results/figures/f1_scores',
-        'results/reports',
-        'results/data'
+        '结果',
+        '结果/图表',
+        '结果/图表/训练曲线',
+        '结果/图表/性能对比',
+        '结果/图表/混淆矩阵',
+        '结果/图表/F1分数',
+        '结果/报告',
+        '结果/数据'
     ]
     
     for directory in directories:
         if not os.path.exists(directory):
             os.makedirs(directory)
             print(f"Created directory: {directory}")
+
+# 创建本次运行的结果目录
+def create_run_directories():
+    """创建本次运行的结果目录"""
+    # 本次运行的目录结构
+    directories = [
+        f'结果/图表/训练曲线/run_{RUN_ID}',
+        f'结果/图表/性能对比/run_{RUN_ID}',
+        f'结果/图表/混淆矩阵/run_{RUN_ID}',
+        f'结果/图表/F1分数/run_{RUN_ID}',
+        f'结果/报告/run_{RUN_ID}',
+        f'结果/数据/run_{RUN_ID}'
+    ]
+    
+    for directory in directories:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            print(f"Created directory: {directory}")
+    
+    return RUN_ID
 
 def plot_training_curves(fold_results, snr_db=0):
     """绘制训练曲线"""
@@ -49,7 +79,7 @@ def plot_training_curves(fold_results, snr_db=0):
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     
-    plt.savefig(f'results/figures/training_curves/training_curves_{snr_db}dB.png')
+    plt.savefig(f'结果/图表/训练曲线/run_{RUN_ID}/训练曲线_{snr_db}dB.png')
     plt.close()
 
 def plot_snr_vs_accuracy(all_results):
@@ -70,7 +100,7 @@ def plot_snr_vs_accuracy(all_results):
     plt.xticks(snr_values)
     plt.ylim(0, 1)
     
-    plt.savefig('results/figures/performance/snr_vs_accuracy.png')
+    plt.savefig(f'结果/图表/性能对比/run_{RUN_ID}/信噪比_准确率.png')
     plt.close()
 
 def plot_confusion_matrix(y_true, y_pred, classes, snr_db=0):
@@ -84,7 +114,7 @@ def plot_confusion_matrix(y_true, y_pred, classes, snr_db=0):
     plt.ylabel('True Label')
     plt.tight_layout()
     
-    plt.savefig(f'results/figures/confusion_matrices/confusion_matrix_{snr_db}dB.png')
+    plt.savefig(f'结果/图表/混淆矩阵/run_{RUN_ID}/混淆矩阵_{snr_db}dB.png')
     plt.close()
 
 def plot_f1_scores(f1_scores, classes, snr_db=0):
@@ -102,7 +132,7 @@ def plot_f1_scores(f1_scores, classes, snr_db=0):
         plt.text(i, v + 0.01, f'{v:.3f}', ha='center')
     
     plt.tight_layout()
-    plt.savefig(f'results/figures/f1_scores/f1_scores_{snr_db}dB.png')
+    plt.savefig(f'结果/图表/F1分数/run_{RUN_ID}/F1分数_{snr_db}dB.png')
     plt.close()
 
 def plot_model_comparison(results_dict, snr_values):
@@ -121,23 +151,25 @@ def plot_model_comparison(results_dict, snr_values):
     plt.xticks(snr_values)
     plt.ylim(0, 1)
     
-    plt.savefig('results/figures/performance/model_comparison.png')
+    plt.savefig(f'结果/图表/性能对比/run_{RUN_ID}/模型对比.png')
     plt.close()
 
 def generate_report(all_results):
     """生成实验报告"""
-    with open('results/reports/experiment_report.txt', 'w') as f:
-        f.write('DRSN-NTF 实验报告\n')
+    report_path = f'结果/报告/run_{RUN_ID}/实验报告.txt'
+    with open(report_path, 'w') as f:
+        f.write(f'DRSN-NTF 实验报告\n')
+        f.write(f'运行ID: {RUN_ID}\n')
         f.write('='*50 + '\n\n')
         
         for snr in sorted(all_results.keys()):
             f.write(f'SNR = {snr}dB\n')
             f.write('-'*30 + '\n')
-            f.write(f'Average Best Accuracy: {all_results[snr]["avg_best_acc"]:.4f}\n')
-            f.write(f'Average Final Accuracy: {all_results[snr]["avg_final_acc"]:.4f}\n\n')
+            f.write(f'平均最佳准确率: {all_results[snr]["avg_best_acc"]:.4f}\n')
+            f.write(f'平均最终准确率: {all_results[snr]["avg_final_acc"]:.4f}\n\n')
         
         # 计算平均性能
         avg_overall = np.mean([all_results[snr]['avg_final_acc'] for snr in all_results.keys()])
-        f.write(f'Average Accuracy Across All SNRs: {avg_overall:.4f}\n')
+        f.write(f'所有SNR下的平均准确率: {avg_overall:.4f}\n')
         
-    print("Experiment report generated: experiment_report.txt")
+    print(f"实验报告已生成: {report_path}")

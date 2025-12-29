@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络协议分析软件</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#1e40af',
+                        secondary: '#3b82f6',
+                        accent: '#60a5fa',
+                        success: '#10b981',
+                        warning: '#f59e0b',
+                        danger: '#ef4444',
+                        info: '#3b82f6',
+                        dark: '#1f2937',
+                        light: '#f8fafc'
+                    },
+                    fontFamily: {
+                        inter: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .scrollbar-thin {
+                scrollbar-width: thin;
+            }
+            .scrollbar-hide::-webkit-scrollbar {
+                display: none;
+            }
+            .packet-highlight {
+                @apply bg-blue-50 border-l-4 border-blue-500;
+            }
+            .protocol-badge {
+                @apply px-2 py-1 rounded-full text-xs font-medium;
+            }
+            .glass-effect {
+                @apply bg-white/90 backdrop-blur-sm border border-gray-200/80;
+            }
+        }
+    </style>
+</head>
+<body class="font-inter bg-gray-50 text-gray-900 h-screen flex flex-col overflow-hidden">
+    <!-- 顶部导航栏 -->
+    <header class="bg-white border-b border-gray-200 shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <!-- 软件标题 -->
+            <div class="flex items-center space-x-2">
+                <div class="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
+                    <i class="fa fa-exchange text-white"></i>
+                </div>
+                <h1 class="text-xl font-bold text-gray-800">NetAnalyzer</h1>
+            </div>
+            
+            <!-- 菜单 -->
+            <nav class="hidden md:flex items-center space-x-6">
+                <a href="#" class="text-gray-600 hover:text-primary transition-colors">文件</a>
+                <a href="#" class="text-gray-600 hover:text-primary transition-colors">编辑</a>
+                <a href="#" class="text-gray-600 hover:text-primary transition-colors">视图</a>
+                <a href="#" class="text-gray-600 hover:text-primary transition-colors">捕获</a>
+                <a href="#" class="text-gray-600 hover:text-primary transition-colors">分析</a>
+                <a href="#" class="text-gray-600 hover:text-primary transition-colors">帮助</a>
+            </nav>
+            
+            <!-- 工具栏 -->
+            <div class="flex items-center space-x-3">
+                <button id="startCapture" class="bg-success hover:bg-green-600 text-white px-4 py-2 rounded-md transition-colors flex items-center space-x-2">
+                    <i class="fa fa-play"></i>
+                    <span class="hidden sm:inline">开始捕获</span>
+                </button>
+                <button id="stopCapture" class="bg-danger hover:bg-red-600 text-white px-4 py-2 rounded-md transition-colors flex items-center space-x-2">
+                    <i class="fa fa-stop"></i>
+                    <span class="hidden sm:inline">停止</span>
+                </button>
+                <button class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-2 rounded-md transition-colors">
+                    <i class="fa fa-cog"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区域 -->
+    <main class="flex-1 flex overflow-hidden">
+        <!-- 左侧边栏 -->
+        <aside class="w-64 border-r border-gray-200 bg-white flex flex-col">
+            <!-- 捕获控制 -->
+            <div class="p-4 border-b border-gray-200">
+                <h3 class="font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="fa fa-sliders text-gray-500 mr-2"></i>
+                    捕获控制
+                </h3>
+                
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">网络接口</label>
+                        <select class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary/20">
+                            <option>eth0 - 以太网</option>
+                            <option>wlan0 - 无线网卡</option>
+                            <option>lo - 回环接口</option>
+                        </select>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">过滤器</label>
+                        <input type="text" placeholder="tcp port 80 or udp port 53" 
+                               class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring focus:ring-primary/20 px-3 py-2 text-sm">
+                    </div>
+                    
+                    <div class="flex space-x-2">
+                        <button class="flex-1 bg-primary hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm transition-colors">
+                            应用过滤器
+                        </button>
+                        <button class="bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-md px-3 py-2 text-sm transition-colors">
+                            <i class="fa fa-refresh"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 协议统计 -->
+            <div class="p-4 border-b border-gray-200 flex-1 overflow-y-auto scrollbar-thin">
+                <h3 class="font-semibold text-gray-800 mb-3 flex items-center">
+                    <i class="fa fa-bar-chart text-gray-500 mr-2"></i>
+                    协议统计
+                </h3>
+                
+                <div class="mb-4">
+                    <canvas id="protocolChart" width="200" height="200"></canvas>
+                </div>
+                
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md transition-colors">
+                        <div class="flex items-center">
+                            <span class="w-3 h-3 bg-blue-500 rounded-full mr-2"></span>
+                            <span class="text-sm">TCP</span>
+                        </div>
+                        <span class="text-sm font-medium">1,245</span>
+                    </div>
+                    <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md transition-colors">
+                        <div class="flex items-center">
+                            <span class="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+                            <span class="text-sm">HTTP</span>
+                        </div>
+                        <span class="text-sm font-medium">872</span>
+                    </div>
+                    <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md transition-colors">
+                        <div class="flex items-center">
+                            <span class="w-3 h-3 bg-yellow-500 rounded-full mr-2"></span>
+                            <span class="text-sm">UDP</span>
+                        </div>
+                        <span class="text-sm font-medium">456</span>
+                    </div>
+                    <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md transition-colors">
+                        <div class="flex items-center">
+                            <span class="w-3 h-3 bg-purple-500 rounded-full mr-2"></span>
+                            <span class="text-sm">DNS</span>
+                        </div>
+                        <span class="text-sm font-medium">234</span>
+                    </div>
+                    <div class="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md transition-colors">
+                        <div class="flex items-center">
+                            <span class="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
+                            <span class="text-sm">ICMP</span>
+                        </div>
+                        <span class="text-sm font-medium">89</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 状态信息 -->
+            <div class="p-3 bg-gray-50 border-t border-gray-200">
+                <div class="text-xs text-gray-600">
+                    <div class="flex justify-between mb-1">
+                        <span>已捕获:</span>
+                        <span class="font-medium">2,896 数据包</span>
+                    </div>
+                    <div class="flex justify-between mb-1">
+                        <span>已显示:</span>
+                        <span class="font-medium">2,896 数据包</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span>捕获文件:</span>
+                        <span class="font-medium">capture.pcap</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- 主内容区域 -->
+        <div class="flex-1 flex flex-col overflow-hidden">
+            <!-- 数据包列表 -->
+            <div class="flex-1 overflow-y-auto scrollbar-thin">
+                <table class="w-full border-collapse">
+                    <thead class="bg-gray-50 sticky top-0 z-10">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                                <div class="flex items-center">
+                                    <span>No.</span>
+                                    <i class="fa fa-sort text-gray-400 ml-1"></i>
+                                </div>
+                            </th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                                <div class="flex items-center">
+                                    <span>时间</span>
+                                    <i class="fa fa-sort text-gray-400 ml-1"></i>
+                                </div>
+                            </th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                                <div class="flex items-center">
+                                    <span>源</span>
+                                    <i class="fa fa-sort text-gray-400 ml-1"></i>
+                                </div>
+                            </th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                                <div class="flex items-center">
+                                    <span>目的</span>
+                                    <i class="fa fa-sort text-gray-400 ml-1"></i>
+                                </div>
+                            </th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                                <div class="flex items-center">
+                                    <span>协议</span>
+                                    <i class="fa fa-sort text-gray-400 ml-1"></i>
+                                </div>
+                            </th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                                <div class="flex items-center">
+                                    <span>长度</span>
+                                    <i class="fa fa-sort text-gray-400 ml-1"></i>
+                                </div>
+                            </th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-b">
+                                <div class="flex items-center">
+                                    <span>信息</span>
+                                    <i class="fa fa-sort text-gray-400 ml-1"></i>
+                                </div>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="packetTableBody">
+                        <!-- 数据包行示例 -->
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">1</td>
+                            <td class="px-3 py-2 border-b text-sm">0.000000</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.1</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-blue-100 text-blue-800">ARP</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">42</td>
+                            <td class="px-3 py-2 border-b text-sm">Who has 192.168.1.1? Tell 192.168.1.100</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">2</td>
+                            <td class="px-3 py-2 border-b text-sm">0.000082</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.1</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-blue-100 text-blue-800">ARP</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">60</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.1 is at 00:11:22:33:44:55</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors packet-highlight">
+                            <td class="px-3 py-2 border-b">3</td>
+                            <td class="px-3 py-2 border-b text-sm">0.234567</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100:54321</td>
+                            <td class="px-3 py-2 border-b text-sm">93.184.216.34:80</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-green-100 text-green-800">HTTP</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">78</td>
+                            <td class="px-3 py-2 border-b text-sm">GET / HTTP/1.1</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">4</td>
+                            <td class="px-3 py-2 border-b text-sm">0.234610</td>
+                            <td class="px-3 py-2 border-b text-sm">93.184.216.34:80</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100:54321</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-blue-100 text-blue-800">TCP</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">66</td>
+                            <td class="px-3 py-2 border-b text-sm">80 → 54321 [SYN, ACK] Seq=0 Ack=1 Win=65535</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">5</td>
+                            <td class="px-3 py-2 border-b text-sm">0.234612</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100:54321</td>
+                            <td class="px-3 py-2 border-b text-sm">93.184.216.34:80</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-blue-100 text-blue-800">TCP</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">54</td>
+                            <td class="px-3 py-2 border-b text-sm">54321 → 80 [ACK] Seq=1 Ack=1 Win=65535</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">6</td>
+                            <td class="px-3 py-2 border-b text-sm">0.289123</td>
+                            <td class="px-3 py-2 border-b text-sm">93.184.216.34:80</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100:54321</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-green-100 text-green-800">HTTP</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">1514</td>
+                            <td class="px-3 py-2 border-b text-sm">HTTP/1.1 200 OK (text/html)</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">7</td>
+                            <td class="px-3 py-2 border-b text-sm">0.289156</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100:54321</td>
+                            <td class="px-3 py-2 border-b text-sm">93.184.216.34:80</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-blue-100 text-blue-800">TCP</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">54</td>
+                            <td class="px-3 py-2 border-b text-sm">54321 → 80 [ACK] Seq=1 Ack=1461 Win=65535</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">8</td>
+                            <td class="px-3 py-2 border-b text-sm">0.301234</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100:53</td>
+                            <td class="px-3 py-2 border-b text-sm">8.8.8.8:53</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-purple-100 text-purple-800">DNS</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">75</td>
+                            <td class="px-3 py-2 border-b text-sm">Standard query 0x1234 A example.com</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">9</td>
+                            <td class="px-3 py-2 border-b text-sm">0.301345</td>
+                            <td class="px-3 py-2 border-b text-sm">8.8.8.8:53</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100:53</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-purple-100 text-purple-800">DNS</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">91</td>
+                            <td class="px-3 py-2 border-b text-sm">Standard query response 0x1234 A example.com</td>
+                        </tr>
+                        <tr class="packet-row hover:bg-gray-50 cursor-pointer transition-colors">
+                            <td class="px-3 py-2 border-b">10</td>
+                            <td class="px-3 py-2 border-b text-sm">0.500123</td>
+                            <td class="px-3 py-2 border-b text-sm">192.168.1.100</td>
+                            <td class="px-3 py-2 border-b text-sm">8.8.8.8</td>
+                            <td class="px-3 py-2 border-b">
+                                <span class="protocol-badge bg-red-100 text-red-800">ICMP</span>
+                            </td>
+                            <td class="px-3 py-2 border-b text-sm">84</td>
+                            <td class="px-3 py-2 border-b text-sm">Echo (ping) request id=0x1234, seq=1, ttl=64</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 数据包详细信息 -->
+            <div class="h-64 border-t border-gray-200 bg-white flex">
+                <!-- 协议树 -->
+                <div class="w-1/3 border-r border-gray-200 overflow-y-auto scrollbar-thin">
+                    <div class="p-3">
+                        <div class="packet-tree">
+                            <div class="packet-tree-item p-1 hover:bg-gray-50 rounded cursor-pointer font-medium">
+                                Frame 3: 78 bytes on wire (624 bits), 78 bytes captured (624 bits)
+                            </div>
+                            <div class="packet-tree-item p-1 hover:bg-gray-50 rounded cursor-pointer ml-2">
+                                Ethernet II, Src: Apple_12:34:56 (00:11:22:33:44:55), Dst: Cisco_67:89:ab (66:77:88:99:aa:bb)
+                            </div>
+                            <div class="packet-tree-item p-1 hover:bg-gray-50 rounded cursor-pointer ml-2">
+                                Internet Protocol Version 4, Src: 192.168.1.100, Dst: 93.184.216.34
+                            </div>
+                            <div class="packet-tree-item p-1 hover:bg-gray-50 rounded cursor-pointer ml-2">
+                                Transmission Control Protocol, Src Port: 54321, Dst Port: 80, Seq: 0, Len: 0
+                            </div>
+                            <div class="packet-tree-item p-1 bg-blue-50 border-l-2 border-blue-500 rounded cursor-pointer ml-2 font-medium">
+                                Hypertext Transfer Protocol
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 详细信息 -->
+                <div class="w-2/3 overflow-y-auto scrollbar-thin">
+                    <div class="p-3">
+                        <h4 class="font-semibold text-gray-800 mb-2">Hypertext Transfer Protocol</h4>
+                        
+                        <div class="space-y-1 text-sm">
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Request Method:</span>
+                                <span class="font-medium">GET</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Request URI:</span>
+                                <span>/</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Request Version:</span>
+                                <span>HTTP/1.1</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Host:</span>
+                                <span>example.com</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">User-Agent:</span>
+                                <span>Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Accept:</span>
+                                <span>text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Accept-Language:</span>
+                                <span>en-US,en;q=0.5</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Accept-Encoding:</span>
+                                <span>gzip, deflate</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Connection:</span>
+                                <span>keep-alive</span>
+                            </div>
+                            <div class="flex">
+                                <span class="w-32 text-gray-600">Upgrade-Insecure-Requests:</span>
+                                <span>1</span>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-4 pt-3 border-t border-gray-200">
+                            <h5 class="font-medium text-gray-700 mb-2">原始数据:</h5>
+                            <div class="bg-gray-900 text-gray-300 p-2 rounded text-xs font-mono overflow-x-auto">
+                                47 45 54 20 2f 20 48 54 54 50 2f 31 2e 31 0d 0a 48 6f 73 74 3a 20 65 78 61 6d 70 6c 65 2e 63 6f 6d 0d 0a 55 73 65 72 2d 41 67 65 6e 74 3a 20 4d 6f 7a 69 6c 6c 61 2f 35 2e 30 20 28 57 69 6e 64 6f 77 73 20 4e 54 20 31 30 2e 30 3b 20 57 69 6e 36 34 3b 20 78 36 34 29 20 41 70 70 6c 65 57 65 62 4b 69 74 2f 35 33 37 2e 33 36 0d 0a
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 底部状态栏 -->
+    <footer class="bg-gray-800 text-gray-300 py-2 px-4 text-sm">
+        <div class="flex justify-between items-center">
+            <div>
+                <span class="mr-4"><i class="fa fa-info-circle mr-1"></i>NetAnalyzer v1.0.0</span>
+                <span><i class="fa fa-database mr-1"></i>已保存: 2,896 数据包</span>
+            </div>
+            <div>
+                <span class="mr-4"><i class="fa fa-clock-o mr-1"></i>捕获时间: 00:05:32</span>
+                <span><i class="fa fa-tachometer mr-1"></i>速率: 8.5 数据包/秒</span>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // 初始化协议统计图表
+        document.addEventListener('DOMContentLoaded', function() {
+            const ctx = document.getElementById('protocolChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['TCP', 'HTTP', 'UDP', 'DNS', 'ICMP'],
+                    datasets: [{
+                        data: [1245, 872, 456, 234, 89],
+                        backgroundColor: [
+                            '#3b82f6', // blue
+                            '#10b981', // green
+                            '#f59e0b', // yellow
+                            '#8b5cf6', // purple
+                            '#ef4444'  // red
+                        ],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return context.label + ': ' + context.raw + ' 数据包';
+                                }
+                            }
+                        }
+                    },
+                    cutout: '70%'
+                }
+            });
+        });
+
+        // 数据包行点击事件
+        document.querySelectorAll('.packet-row').forEach(row => {
+            row.addEventListener('click', function() {
+                // 移除其他行的高亮
+                document.querySelectorAll('.packet-row').forEach(r => {
+                    r.classList.remove('packet-highlight');
+                });
+                // 添加当前行的高亮
+                this.classList.add('packet-highlight');
+            });
+        });
+
+        // 捕获控制按钮
+        document.getElementById('startCapture').addEventListener('click', function() {
+            alert('开始捕获数据包...');
+            // 实际应用中这里会启动Scapy的sniff函数
+        });
+
+        document.getElementById('stopCapture').addEventListener('click', function() {
+            alert('停止捕获数据包');
+            // 实际应用中这里会停止Scapy的sniff函数
+        });
+
+        // 模拟实时更新数据包列表
+        function addNewPacket() {
+            const tableBody = document.getElementById('packetTableBody');
+            const rowCount = tableBody.children.length + 1;
+            
+            const newRow = document.createElement('tr');
+            newRow.className = 'packet-row hover:bg-gray-50 cursor-pointer transition-colors';
+            
+            const randomProtocols = [
+                {name: 'TCP', color: 'blue', info: '54321 → 80 [ACK] Seq=1 Ack=1 Win=65535'},
+                {name: 'HTTP', color: 'green', info: 'GET /api/data HTTP/1.1'},
+                {name: 'UDP', color: 'yellow', info: '53 → 5353 Len=32'},
+                {name: 'DNS', color: 'purple', info: 'Standard query 0xabcd A www.google.com'},
+                {name: 'ICMP', color: 'red', info: 'Echo (ping) request id=0xabcd, seq=123, ttl=64'}
+            ];
+            
+            const randomProtocol = randomProtocols[Math.floor(Math.random() * randomProtocols.length)];
+            const sourceIp = `192.168.1.${Math.floor(Math.random() * 255)}`;
+            const destIp = `192.168.1.${Math.floor(Math.random() * 255)}`;
+            const length = Math.floor(Math.random() * 1500) + 40;
+            
+            newRow.innerHTML = `
+                <td class="px-3 py-2 border-b">${rowCount}</td>
+                <td class="px-3 py-2 border-b text-sm">${(Math.random() * 10).toFixed(6)}</td>
+                <td class="px-3 py-2 border-b text-sm">${sourceIp}</td>
+                <td class="px-3 py-2 border-b text-sm">${destIp}</td>
+                <td class="px-3 py-2 border-b">
+                    <span class="protocol-badge bg-${randomProtocol.color}-100 text-${randomProtocol.color}-800">${randomProtocol.name}</span>
+                </td>
+                <td class="px-3 py-2 border-b text-sm">${length}</td>
+                <td class="px-3 py-2 border-b text-sm">${randomProtocol.info}</td>
+            `;
+            
+            // 添加点击事件
+            newRow.addEventListener('click', function() {
+                document.querySelectorAll('.packet-row').forEach(r => {
+                    r.classList.remove('packet-highlight');
+                });
+                this.classList.add('packet-highlight');
+            });
+            
+            // 添加到表格顶部
+            tableBody.insertBefore(newRow, tableBody.firstChild);
+            
+            // 如果行数超过100，删除最后一行
+            if (tableBody.children.length > 100) {
+                tableBody.removeChild(tableBody.lastChild);
+            }
+        }
+
+        // 模拟每2秒添加一个新数据包
+        setInterval(addNewPacket, 2000);
+    </script>
+</body>
+</html>

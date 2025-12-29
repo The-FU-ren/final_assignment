@@ -4,6 +4,8 @@ from sklearn.preprocessing import StandardScaler
 import torch
 from torch.utils.data import Dataset, DataLoader
 import os
+from scipy import signal
+import random
 
 class DAADataset(Dataset):
     def __init__(self, data, labels, transform=None):
@@ -19,7 +21,10 @@ class DAADataset(Dataset):
         label = self.labels[idx]
         
         if self.transform:
-            sample = self.transform(sample)
+            # 将sample转换为numpy数组进行数据增强
+            sample_np = sample.cpu().numpy()
+            sample_np = self.transform(sample_np)
+            sample = torch.tensor(sample_np, dtype=torch.float32)
         
         return sample, label
 
@@ -29,6 +34,98 @@ def add_noise(data, snr_db):
     noise_power = signal_power / (10 ** (snr_db / 10))
     noise = np.random.normal(0, np.sqrt(noise_power), data.shape)
     return data + noise
+
+def time_stretch(signal, rate=1.0):
+    """时间拉伸"""
+    original_length = signal.shape[-1]
+    if rate == 1.0:
+        return signal
+    
+    # 计算新的长度
+    new_length = int(original_length * rate)
+    stretched_signal = np.zeros_like(signal)
+    
+    for i in range(signal.shape[0]):
+        # 使用线性插值进行时间拉伸
+        if new_length > original_length:
+            # 放大
+            x_old = np.linspace(0, 1, original_length)
+            x_new = np.linspace(0, 1, new_length)
+            stretched = np.interp(x_new, x_old, signal[i])
+            stretched_signal[i] = stretched[:original_length]  # 截断到原始长度
+        else:
+            # 缩小
+            x_old = np.linspace(0, 1, original_length)
+            x_new = np.linspace(0, 1, new_length)
+            stretched = np.interp(x_new, x_old, signal[i])
+            stretched_signal[i, :new_length] = stretched
+    
+    return stretched_signal
+
+def amplitude_scale(signal, scale_factor=1.0):
+    """幅度缩放"""
+    return signal * scale_factor
+
+def time_shift(signal, shift_ratio=0.0):
+    """时间偏移"""
+    if shift_ratio == 0.0:
+        return signal
+    
+    signal_length = signal.shape[-1]
+    shift_samples = int(signal_length * shift_ratio)
+    shifted_signal = np.zeros_like(signal)
+    
+    if shift_samples > 0:
+        # 向右偏移
+        shifted_signal[:, shift_samples:] = signal[:, :-shift_samples]
+    else:
+        # 向左偏移
+        shifted_signal[:, :shift_samples] = signal[:, -shift_samples:]
+    
+    return shifted_signal
+
+class DataAugmentation:
+    """数据增强类"""
+    def __init__(self, 
+                 time_stretch_rates=[0.8, 0.9, 1.0, 1.1, 1.2],
+                 amplitude_scales=[0.5, 0.75, 1.0, 1.25, 1.5],
+                 snr_dbs=[5, 10, 15, 20],
+                 time_shifts=[-0.1, -0.05, 0.0, 0.05, 0.1]):
+        self.time_stretch_rates = time_stretch_rates
+        self.amplitude_scales = amplitude_scales
+        self.snr_dbs = snr_dbs
+        self.time_shifts = time_shifts
+    
+    def __call__(self, signal):
+        """应用数据增强"""
+        import random
+        
+        # 确保输入是2D数组 (batch_size, signal_length)
+        if signal.ndim == 3:
+            # 如果是3D数组 (1, batch_size, signal_length)，转换为2D
+            signal = signal.squeeze(0)
+        elif signal.ndim == 1:
+            # 如果是1D数组 (signal_length)，转换为2D
+            signal = signal.reshape(1, -1)
+        
+        # 随机选择时间拉伸率
+        stretch_rate = random.choice(self.time_stretch_rates)
+        signal = time_stretch(signal, rate=stretch_rate)
+        
+        # 随机选择幅度缩放因子
+        scale_factor = random.choice(self.amplitude_scales)
+        signal = amplitude_scale(signal, scale_factor=scale_factor)
+        
+        # 随机选择SNR添加高斯噪声
+        snr_db = random.choice(self.snr_dbs)
+        signal = add_noise(signal, snr_db=snr_db)
+        
+        # 随机选择时间偏移
+        shift_ratio = random.choice(self.time_shifts)
+        signal = time_shift(signal, shift_ratio=shift_ratio)
+        
+        # 恢复原始形状
+        return signal
 
 def load_data(data_path=r"G:\gitcode\das_small_dataset_N50_20241230_154821.h5"):
     """加载H5数据集"""
@@ -111,10 +208,13 @@ def preprocess_data(data, snr_db=0, normalize=True):
     
     return noisy_data
 
-def create_kfold_loaders(data, labels, batch_size=128, snr_db=0, n_splits=10):
+def create_kfold_loaders(data, labels, batch_size=128, snr_db=0, n_splits=10, num_workers=4, use_data_augmentation=True):
     """创建十折交叉验证的数据加载器"""
     kfold = KFold(n_splits=n_splits, shuffle=True, random_state=42)
     loaders = []
+    
+    # 初始化数据增强器
+    data_augmentation = DataAugmentation()
     
     for train_idx, test_idx in kfold.split(data):
         # 划分训练集和测试集
@@ -126,12 +226,16 @@ def create_kfold_loaders(data, labels, batch_size=128, snr_db=0, n_splits=10):
         test_data = preprocess_data(test_data, snr_db)
         
         # 创建数据集
-        train_dataset = DAADataset(train_data, train_labels)
-        test_dataset = DAADataset(test_data, test_labels)
+        if use_data_augmentation:
+            train_dataset = DAADataset(train_data, train_labels, transform=data_augmentation)
+        else:
+            train_dataset = DAADataset(train_data, train_labels)
         
-        # 创建数据加载器
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        test_dataset = DAADataset(test_data, test_labels)  # 测试集不使用数据增强
+        
+        # 创建数据加载器，使用num_workers启用多线程
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
         
         loaders.append((train_loader, test_loader))
     
