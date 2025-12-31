@@ -11,8 +11,8 @@ class PacketCapture:
         """显示可用的网络接口，包含友好名称"""
         from scapy.all import IFACES
         for name, iface in IFACES.items():
-            # 构建友好的接口名称
-            friendly_name = f"{iface.description} ({name})"
+            # 构建友好的接口名称，去掉设备路径
+            friendly_name = f"{iface.description}"
             if iface.ip:
                 friendly_name += f" - {iface.ip}"
             print(f"  - {friendly_name}")
@@ -26,7 +26,8 @@ class PacketCapture:
         from scapy.all import IFACES
         friendly_interfaces = {}
         for name, iface in IFACES.items():
-            friendly_name = f"{iface.description} ({name})"
+            # 构建友好的接口名称，去掉设备路径
+            friendly_name = f"{iface.description}"
             if iface.ip:
                 friendly_name += f" - {iface.ip}"
             friendly_interfaces[friendly_name] = name
