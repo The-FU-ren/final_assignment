@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description='DRSN-NTF 模型训练与超参数优化')
     parser.add_argument('--optimize', action='store_true', help='运行超参数优化')
     parser.add_argument('--n-calls', type=int, default=50, help='超参数优化的调用次数')
-    parser.add_argument('--batch-size', type=int, default=128, help='批量大小')
+    parser.add_argument('--batch-size', type=int, default=256, help='批量大小')
     parser.add_argument('--epochs', type=int, default=100, help='训练周期')
     parser.add_argument('--initial-channels', type=int, default=8, help='初始通道数')
     parser.add_argument('--depth', type=int, default=34, help='模型深度')
@@ -27,6 +27,8 @@ def main():
     parser.add_argument('--use-data-augmentation', action='store_true', default=False, help='使用数据增强')
     parser.add_argument('--weight-decay', type=float, default=1e-4, help='权重衰减系数')
     parser.add_argument('--patience', type=int, default=20, help='早停机制的耐心值')
+    parser.add_argument('--gradient-accumulation-steps', type=int, default=1, help='梯度累积步数')
+    parser.add_argument('--num-workers', type=int, default=12, help='数据加载线程数')
     
     args = parser.parse_args()
     
@@ -58,6 +60,7 @@ def main():
             batch_size=args.batch_size,
             epochs=args.epochs,
             run_id=RUN_ID,
+            num_workers=args.num_workers,
             **best_params
         )
     else:
@@ -81,6 +84,7 @@ def main():
             batch_size=args.batch_size,
             epochs=args.epochs,
             run_id=RUN_ID,
+            num_workers=args.num_workers,
             **hyperparams
         )
     

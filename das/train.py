@@ -72,27 +72,79 @@ signal.signal(signal.SIGINT, signal_handler)
 
 def get_lr_scheduler(optimizer, total_epochs=100):
     """获取学习率调度器"""
-    def lr_lambda(epoch):
-        if epoch < 40:
-            return 0.1
-        elif epoch < 80:
-            return 0.01
-        else:
-            return 0.001
-    
-    return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    # 使用余弦退火学习率调度器，更平滑地调整学习率，有助于模型更快收敛
+    return optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs, eta_min=1e-5)
 
-def train_one_epoch(model, train_loader, criterion, optimizer, device, scaler):
-    """训练一个epoch"""
+def train_one_epoch(model, train_loader, criterion, optimizer, device, scaler, gradient_accumulation_steps=1, use_data_augmentation=True):
+    """训练一个epoch，支持梯度累积"""
     model.train()
     running_loss = 0.0
     all_preds = []
     all_labels = []
     
-    for inputs, labels in train_loader:
+    # 初始化梯度
+    optimizer.zero_grad()
+    
+    for i, (inputs, labels) in enumerate(train_loader):
         inputs, labels = inputs.to(device), labels.to(device)
         
-        optimizer.zero_grad()
+        # 在GPU上进行数据增强
+        if use_data_augmentation:
+            # 时间拉伸
+            with torch.no_grad():
+                # 随机选择时间拉伸率 (0.8-1.2)
+                stretch_rate = torch.rand(inputs.shape[0], device=device) * 0.4 + 0.8
+                # 简单的时间拉伸实现，使用线性插值
+                for b in range(inputs.shape[0]):
+                    original_length = inputs.shape[-1]
+                    new_length = int(original_length * stretch_rate[b])
+                    if new_length > original_length:
+                        # 放大
+                        x_old = torch.linspace(0, 1, original_length, device=device)
+                        x_new = torch.linspace(0, 1, new_length, device=device)
+                        stretched = torch.nn.functional.interpolate(
+                            inputs[b].unsqueeze(0).unsqueeze(0),
+                            size=(1, new_length),
+                            mode='linear',
+                            align_corners=True
+                        ).squeeze(0).squeeze(0)
+                        inputs[b] = stretched[:original_length]
+                    else:
+                        # 缩小
+                        x_old = torch.linspace(0, 1, original_length, device=device)
+                        x_new = torch.linspace(0, 1, new_length, device=device)
+                        stretched = torch.nn.functional.interpolate(
+                            inputs[b].unsqueeze(0).unsqueeze(0),
+                            size=(1, new_length),
+                            mode='linear',
+                            align_corners=True
+                        ).squeeze(0).squeeze(0)
+                        inputs[b, :new_length] = stretched
+                
+                # 随机幅度缩放 (0.5-1.5)
+                scale_factor = torch.rand(inputs.shape[0], device=device) + 0.5
+                inputs = inputs * scale_factor.view(-1, 1, 1)
+                
+                # 添加高斯噪声
+                noise = torch.randn_like(inputs, device=device)
+                snr_db = torch.rand(inputs.shape[0], device=device) * 15 + 5  # 5-20dB
+                signal_power = torch.mean(inputs ** 2, dim=2, keepdim=True)
+                noise_power = signal_power / (10 ** (snr_db.view(-1, 1, 1) / 10))
+                inputs = inputs + noise * torch.sqrt(noise_power)
+                
+                # 时间偏移 (-0.1到0.1的比例)
+                shift_ratio = (torch.rand(inputs.shape[0], device=device) - 0.5) * 0.2
+                for b in range(inputs.shape[0]):
+                    shift = int(inputs.shape[-1] * shift_ratio[b])
+                    if shift > 0:
+                        # 向右偏移
+                        inputs[b, :, shift:] = inputs[b, :, :-shift]
+                        inputs[b, :, :shift] = 0
+                    else:
+                        # 向左偏移
+                        shift = abs(shift)
+                        inputs[b, :, :-shift] = inputs[b, :, shift:]
+                        inputs[b, :, -shift:] = 0
         
         # 使用混合精度训练
         with autocast(device_type='cuda' if device.type == 'cuda' else 'cpu'):
@@ -101,10 +153,15 @@ def train_one_epoch(model, train_loader, criterion, optimizer, device, scaler):
         
         # 缩放损失，反向传播
         scaler.scale(loss).backward()
-        # 更新参数
-        scaler.step(optimizer)
-        # 更新缩放器
-        scaler.update()
+        
+        # 梯度累积
+        if (i + 1) % gradient_accumulation_steps == 0 or (i + 1) == len(train_loader):
+            # 更新参数
+            scaler.step(optimizer)
+            # 更新缩放器
+            scaler.update()
+            # 清零梯度
+            optimizer.zero_grad()
         
         running_loss += loss.item() * inputs.size(0)
         
@@ -176,10 +233,10 @@ class EarlyStopping:
         
         return self.early_stop
 
-def train_model(snr_db=0, batch_size=128, epochs=100, num_classes=6,
+def train_model(snr_db=0, batch_size=256, epochs=100, num_classes=6,
                 initial_channels=8, depth=34, kernel_size=3,
                 threshold_N=1.0, dropout=0.2, use_batchnorm=True,
-                lr=0.01, weight_decay=1e-4, patience=20, use_data_augmentation=True, run_id=None):
+                lr=0.01, weight_decay=1e-4, patience=20, use_data_augmentation=True, run_id=None, num_workers=8):
     """训练模型"""
     # 设置设备 - 只使用GPU
     if not torch.cuda.is_available():
@@ -192,7 +249,7 @@ def train_model(snr_db=0, batch_size=128, epochs=100, num_classes=6,
     
     # 创建十折交叉验证加载器，使用多线程数据加载和数据增强
     kfold_loaders = create_kfold_loaders(data, labels, batch_size=batch_size, snr_db=snr_db, 
-                                        num_workers=4, use_data_augmentation=use_data_augmentation)
+                                        num_workers=num_workers, pin_memory=True, use_data_augmentation=use_data_augmentation)
     
     # 重置全局训练状态
     global global_training_state
@@ -228,6 +285,9 @@ def train_model(snr_db=0, batch_size=128, epochs=100, num_classes=6,
                         threshold_N=threshold_N,
                         dropout=dropout,
                         use_batchnorm=use_batchnorm).to(device)
+        
+        # 使用PyTorch JIT编译加速模型
+        model = torch.jit.script(model)
         
         # 定义损失函数和优化器，添加L2正则化
         criterion = nn.CrossEntropyLoss()
@@ -269,7 +329,7 @@ def train_model(snr_db=0, batch_size=128, epochs=100, num_classes=6,
             global_training_state['current_epoch'] = epoch+1
             
             # 训练
-            train_loss, train_acc, train_f1 = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler)
+            train_loss, train_acc, train_f1 = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler, gradient_accumulation_steps=1, use_data_augmentation=use_data_augmentation)
             
             # 验证
             test_loss, test_acc, test_f1 = validate(model, test_loader, criterion, device)
@@ -329,7 +389,7 @@ def train_model(snr_db=0, batch_size=128, epochs=100, num_classes=6,
     
     return fold_results, avg_best_acc, avg_final_acc
 
-def run_experiments(snr_values=[0, 1, 2, 3, 4, 5], batch_size=128, epochs=100, run_id=None, **hyperparams):
+def run_experiments(snr_values=[0, 1, 2, 3, 4, 5], batch_size=128, epochs=100, run_id=None, num_workers=8, **hyperparams):
     """运行不同信噪比下的实验"""
     all_results = {}
     
@@ -347,6 +407,7 @@ def run_experiments(snr_values=[0, 1, 2, 3, 4, 5], batch_size=128, epochs=100, r
             batch_size=batch_size, 
             epochs=epochs,
             run_id=run_id,
+            num_workers=num_workers,
             **hyperparams
         )
         
@@ -428,6 +489,9 @@ def optimize_hyperparameters(n_calls=50, batch_size=128, epochs=100):
             model_params = {k: v for k, v in params.items() if k != 'lr'}
             model = DRSN_NTF(num_classes=num_classes, **model_params).to(device)
             
+            # 使用PyTorch JIT编译加速模型
+            model = torch.jit.script(model)
+            
             # 定义损失函数和优化器
             criterion = nn.CrossEntropyLoss()
             optimizer = optim.SGD(model.parameters(), lr=params['lr'], momentum=0.9, weight_decay=0.0001)
@@ -440,7 +504,7 @@ def optimize_hyperparameters(n_calls=50, batch_size=128, epochs=100):
             
             # 训练模型
             for epoch in range(epochs):
-                train_one_epoch(model, train_loader, criterion, optimizer, device, scaler)
+                train_loss, train_acc, train_f1 = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler, gradient_accumulation_steps=1, use_data_augmentation=False)
                 scheduler.step()
             
             # 验证模型

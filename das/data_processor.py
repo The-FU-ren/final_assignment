@@ -20,12 +20,7 @@ class DAADataset(Dataset):
         sample = self.data[idx].unsqueeze(0)  # (1, 8000)
         label = self.labels[idx]
         
-        if self.transform:
-            # 将sample转换为numpy数组进行数据增强
-            sample_np = sample.cpu().numpy()
-            sample_np = self.transform(sample_np)
-            sample = torch.tensor(sample_np, dtype=torch.float32)
-        
+        # 注意：transform会在GPU上应用，此处只返回原始数据
         return sample, label
 
 def add_noise(data, snr_db):
@@ -208,7 +203,7 @@ def preprocess_data(data, snr_db=0, normalize=True):
     
     return noisy_data
 
-def create_kfold_loaders(data, labels, batch_size=128, snr_db=0, n_splits=10, num_workers=4, use_data_augmentation=True):
+def create_kfold_loaders(data, labels, batch_size=128, snr_db=0, n_splits=10, num_workers=8, pin_memory=True, use_data_augmentation=True):
     """创建十折交叉验证的数据加载器"""
     kfold = KFold(n_splits=n_splits, shuffle=True, random_state=42)
     loaders = []
@@ -233,9 +228,9 @@ def create_kfold_loaders(data, labels, batch_size=128, snr_db=0, n_splits=10, nu
         
         test_dataset = DAADataset(test_data, test_labels)  # 测试集不使用数据增强
         
-        # 创建数据加载器，使用num_workers启用多线程
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+        # 创建数据加载器，使用num_workers启用多线程和pin_memory加速GPU传输
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
         
         loaders.append((train_loader, test_loader))
     
