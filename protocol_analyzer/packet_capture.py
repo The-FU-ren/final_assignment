@@ -82,13 +82,23 @@ class PacketCapture:
             def should_stop(packet):
                 return not self.is_running
             
-            sniff(
-                iface=interface,
-                filter=filter_rule if filter_rule else "",
-                prn=packet_handler,
-                store=False,
-                stop_filter=should_stop
-            )
+            # 检查接口是否有效
+            from scapy.all import get_if_list
+            valid_interfaces = get_if_list()
+            if interface not in valid_interfaces:
+                raise ValueError(f"Invalid interface: {interface}")
+            
+            # 添加超时参数，定期检查是否需要停止
+            while self.is_running:
+                # 每次捕获一小段时间，然后检查是否需要停止
+                sniff(
+                    iface=interface,
+                    filter=filter_rule if filter_rule else "",
+                    prn=packet_handler,
+                    store=False,
+                    stop_filter=should_stop,
+                    timeout=1  # 每1秒检查一次停止信号
+                )
         except Exception as e:
             # 尝试使用第3层套接字进行实时捕获
             from scapy.all import conf
@@ -103,15 +113,16 @@ class PacketCapture:
                 def should_stop(packet):
                     return not self.is_running
                 
-                # 对于实时捕获，不设置超时，而是依赖stop_filter来停止
-                sniff(
-                    filter=filter_rule if filter_rule else "",
-                    prn=packet_handler,
-                    store=False,
-                    stop_filter=should_stop,
-                    lfilter=lambda pkt: True,  # 确保捕获所有数据包
-                    timeout=0  # 实时捕获不设置超时
-                )
+                # 添加超时，确保线程可以响应停止信号
+                while self.is_running:
+                    sniff(
+                        filter=filter_rule if filter_rule else "",
+                        prn=packet_handler,
+                        store=False,
+                        stop_filter=should_stop,
+                        lfilter=lambda pkt: True,  # 确保捕获所有数据包
+                        timeout=1  # 每1秒检查一次停止信号
+                    )
             except Exception as e2:
                 print(f"使用第3层套接字实时捕获失败: {e2}")
                 self.is_running = False

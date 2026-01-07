@@ -34,6 +34,12 @@ class CaptureThread(QThread):
     
     def run(self):
         try:
+            # 验证接口是否有效
+            from scapy.all import get_if_list
+            valid_interfaces = get_if_list()
+            if self.interface not in valid_interfaces:
+                raise ValueError(f"无效的网络接口: {self.interface}")
+            
             def callback(packet):
                 if self.is_running:
                     self.packet_captured.emit(packet)
@@ -43,14 +49,19 @@ class CaptureThread(QThread):
                 callback, 
                 self.filter_rule
             )
-            self.capture_stopped.emit()
+            if self.is_running:
+                self.capture_stopped.emit()
         except Exception as e:
             self.capture_error.emit(str(e))
     
     def stop(self):
         self.is_running = False
         self.capture.stop_live_capture()
-        self.wait()
+        # 等待线程结束，但设置超时防止卡死
+        if not self.wait(2000):  # 2秒超时
+            print("捕获线程未能及时停止，强制终止")
+            self.terminate()
+            self.wait(1000)  # 等待终止完成
 
 class ProtocolAnalyzerGUI(QMainWindow):
     """协议分析软件主界面"""
