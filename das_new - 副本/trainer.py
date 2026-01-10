@@ -1,45 +1,45 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from tqdm import tqdm
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 import os
 
 class Trainer:
-    def __init__(self, model, device='cuda' if torch.cuda.is_available() else 'cpu'):
+    def __init__(self, model, device='cuda' if torch.cuda.is_available() else 'cpu', learning_rate=0.0005):
         self.model = model
         self.device = device
+        self.learning_rate = learning_rate
         self.model.to(self.device)
         
         # 定义损失函数和优化器
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.SGD(
+        self.optimizer = optim.AdamW(
             self.model.parameters(),
-            lr=0.1,
-            momentum=0.9,
-            weight_decay=0.0001
+            lr=self.learning_rate,
+            weight_decay=0.001  # 增大权重衰减，提高正则化效果
         )
         
-        # 定义学习率调度器
-        # 学习率：前40轮0.1，中间40轮0.01，最后20轮0.001
-        def lr_lambda(epoch):
-            if epoch < 40:
-                return 1.0
-            elif epoch < 80:
-                return 0.1
-            else:
-                return 0.01
+        # 定义余弦退火学习率调度器，带热重启
+        # T_0：初始周期，T_mult：每次重启后周期翻倍
+        self.scheduler = CosineAnnealingWarmRestarts(
+            self.optimizer, 
+            T_0=10,  # 初始周期为10轮
+            T_mult=2,  # 每次重启后周期翻倍
+            eta_min=1e-6  # 最小学习率
+        )
         
-        self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lr_lambda)
+        # 梯度裁剪阈值
+        self.grad_clip = 1.0
     
-    def train_one_epoch(self, train_loader, epoch):
+    def train_one_epoch(self, train_loader, epoch, total_epochs):
         self.model.train()
         total_loss = 0.0
         correct = 0
         total = 0
         
-        progress_bar = tqdm(train_loader, desc=f"轮次 {epoch+1}/{100}", unit="批次")
+        print(f"轮次 {epoch+1}/{total_epochs} 开始")
         
-        for signals, labels in progress_bar:
+        for batch_idx, (signals, labels) in enumerate(train_loader):
             # 将数据移到设备上
             signals, labels = signals.to(self.device), labels.to(self.device)
             
@@ -52,6 +52,10 @@ class Trainer:
             
             # 反向传播和优化
             loss.backward()
+            
+            # 梯度裁剪，防止梯度爆炸
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            
             self.optimizer.step()
             
             # 更新统计信息
@@ -60,17 +64,16 @@ class Trainer:
             total += labels.size(0)
             correct += predicted.eq(labels).sum().item()
             
-            # 更新进度条
-            progress_bar.set_postfix({
-                '损失': f"{total_loss/len(progress_bar):.3f}",
-                '准确率': f"{100.*correct/total:.2f}%"
-            })
-        
-        # 学习率调度器步进
-        self.scheduler.step()
+            # 打印批次信息
+            if (batch_idx + 1) % 2 == 0:  # 每2个批次打印一次
+                avg_batch_loss = total_loss / (batch_idx + 1)
+                batch_accuracy = 100. * correct / total
+                print(f"  批次 {batch_idx+1}/{len(train_loader)}: 损失={avg_batch_loss:.3f}, 准确率={batch_accuracy:.2f}%")
         
         avg_loss = total_loss / len(train_loader)
         accuracy = 100. * correct / total
+        
+        print(f"轮次 {epoch+1}/{total_epochs} 完成: 平均损失={avg_loss:.3f}, 平均准确率={accuracy:.2f}%")
         
         return avg_loss, accuracy
     
@@ -146,11 +149,23 @@ class Trainer:
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
     
-    def train(self, train_loader, val_loader, num_epochs=100, save_dir="./models"):
+    def train(self, train_loader, val_loader, num_epochs=100, save_dir="./models", patience=20):
         """
-        训练模型指定轮数
+        训练模型指定轮数，包含早停机制
+        
+        参数:
+            train_loader: 训练数据加载器
+            val_loader: 验证数据加载器
+            num_epochs: 最大训练轮数
+            save_dir: 模型保存目录
+            patience: 早停耐心值，连续多少轮验证准确率不提升就停止
+            
+        返回:
+            best_val_accuracy: 最佳验证准确率
+            training_curves: 训练曲线数据
         """
         best_val_accuracy = 0.0
+        early_stop_counter = 0
         
         # 添加训练曲线数据收集
         train_losses = []
@@ -158,33 +173,69 @@ class Trainer:
         val_losses = []
         val_accuracies = []
         
-        for epoch in range(num_epochs):
-            # 训练一轮
-            train_loss, train_accuracy = self.train_one_epoch(train_loader, epoch)
+        try:
+            for epoch in range(num_epochs):
+                print(f"\n{'='*50}")
+                print(f"开始轮次 {epoch+1}/{num_epochs}")
+                print(f"{'='*50}")
+                
+                # 训练一轮
+                print(f"执行训练轮次 {epoch+1}...")
+                train_loss, train_accuracy = self.train_one_epoch(train_loader, epoch, num_epochs)
+                print(f"训练轮次 {epoch+1} 完成")
+                
+                # 验证
+                print(f"执行验证轮次 {epoch+1}...")
+                val_loss, val_accuracy = self.validate(val_loader)
+                print(f"验证轮次 {epoch+1} 完成")
+                
+                # 学习率调度器步进
+                print(f"更新学习率...")
+                self.scheduler.step()
+                print(f"当前学习率: {self.optimizer.param_groups[0]['lr']:.6f}")
+                
+                # 收集训练曲线数据
+                train_losses.append(train_loss)
+                train_accuracies.append(train_accuracy)
+                val_losses.append(val_loss)
+                val_accuracies.append(val_accuracy)
+                
+                # 打印统计信息
+                print(f"\n轮次 {epoch+1}/{num_epochs} 统计信息:")
+                print(f"  训练损失: {train_loss:.3f}, 训练准确率: {train_accuracy:.2f}%")
+                print(f"  验证损失: {val_loss:.3f}, 验证准确率: {val_accuracy:.2f}%")
+                
+                # 保存最佳模型并检查早停
+                if val_accuracy > best_val_accuracy:
+                    best_val_accuracy = val_accuracy
+                    print(f"  验证准确率提升，保存最佳模型...")
+                    self.save_model(os.path.join(save_dir, "best_model.pth"))
+                    print(f"  已保存最佳模型，验证准确率: {best_val_accuracy:.2f}%")
+                    early_stop_counter = 0  # 重置早停计数器
+                else:
+                    early_stop_counter += 1
+                    print(f"  验证准确率未提升，早停计数器: {early_stop_counter}/{patience}")
+                
+                # 检查早停条件
+                if early_stop_counter >= patience:
+                    print(f"\n早停机制触发！连续 {patience} 轮验证准确率未提升，停止训练")
+                    break
             
-            # 验证
-            val_loss, val_accuracy = self.validate(val_loader)
+            # 保存最终模型
+            print(f"\n保存最终模型...")
+            self.save_model(os.path.join(save_dir, "final_model.pth"))
+            print(f"最终模型已保存")
             
-            # 收集训练曲线数据
-            train_losses.append(train_loss)
-            train_accuracies.append(train_accuracy)
-            val_losses.append(val_loss)
-            val_accuracies.append(val_accuracy)
+            print(f"\n{'='*50}")
+            print(f"训练完成！")
+            print(f"最佳验证准确率: {best_val_accuracy:.2f}%")
+            print(f"{'='*50}")
             
-            # 打印统计信息
-            print(f"轮次 {epoch+1}/{num_epochs}:")
-            print(f"  训练损失: {train_loss:.3f}, 训练准确率: {train_accuracy:.2f}%")
-            print(f"  验证损失: {val_loss:.3f}, 验证准确率: {val_accuracy:.2f}%")
-            print()
-            
-            # 保存最佳模型
-            if val_accuracy > best_val_accuracy:
-                best_val_accuracy = val_accuracy
-                self.save_model(os.path.join(save_dir, "best_model.pth"))
-                print(f"  已保存最佳模型，验证准确率: {best_val_accuracy:.2f}%")
-        
-        # 保存最终模型
-        self.save_model(os.path.join(save_dir, "final_model.pth"))
+        except Exception as e:
+            print(f"\n训练过程中发生错误: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
         # 返回训练曲线数据和最佳准确率
         return best_val_accuracy, {

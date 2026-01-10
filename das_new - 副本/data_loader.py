@@ -231,25 +231,26 @@ def get_data_loaders(data_dir, batch_size=128, val_split=0.1, test_split=0.2, ma
     )
     
     # 创建数据加载器，使用自定义collate_fn
+    # 在Windows上使用num_workers=0避免多进程问题
     train_loader = DataLoader(
         train_dataset, 
         batch_size=batch_size, 
         shuffle=True, 
-        num_workers=4, 
+        num_workers=0, 
         collate_fn=collate_fn
     )
     val_loader = DataLoader(
         val_dataset, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=4, 
+        num_workers=0, 
         collate_fn=collate_fn
     )
     test_loader = DataLoader(
         test_dataset, 
         batch_size=batch_size, 
         shuffle=False, 
-        num_workers=4, 
+        num_workers=0, 
         collate_fn=collate_fn
     )
     

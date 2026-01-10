@@ -8,12 +8,15 @@ class NewThresholdFunction(nn.Module):
         self.N = N
     
     def forward(self, x, tau):
+        # 实现论文中的新阈值函数：自适应阈值+指数衰减
+        # 公式：output = x * exp(-(x/tau)^2) * (|x| > tau)
         abs_x = torch.abs(x)
-        mask = abs_x >= tau
+        mask = abs_x > tau
         output = torch.zeros_like(x)
         
         # 应用新阈值函数
-        output[mask] = torch.sign(x[mask]) * (abs_x[mask] - tau[mask] / torch.exp((abs_x[mask] - tau[mask]) / self.N))
+        scaled_x = x / tau
+        output[mask] = x[mask] * torch.exp(-(scaled_x[mask])**2)
         output[~mask] = 0
         
         return output
@@ -86,23 +89,43 @@ class DRSN_NTF(nn.Module):
         super(DRSN_NTF, self).__init__()
         
         # 输入层
-        self.input_conv = nn.Conv2d(1, 4, kernel_size=(1, 3), stride=(1, 2), padding=(0, 1), bias=False)
-        self.input_bn = nn.BatchNorm2d(4)
+        self.input_conv = nn.Conv2d(1, 16, kernel_size=(1, 3), stride=(1, 2), padding=(0, 1), bias=False)
+        self.input_bn = nn.BatchNorm2d(16)
         self.input_relu = nn.ReLU(inplace=True)
         
-        # RSBU-NTF层
-        self.layer1 = RSBU_NTF(4, 4, kernel_size=3, stride=2)
-        self.layer2 = RSBU_NTF(4, 4, kernel_size=3, stride=1)
-        self.layer3 = RSBU_NTF(4, 8, kernel_size=3, stride=2)
-        self.layer4 = RSBU_NTF(8, 8, kernel_size=3, stride=1)
-        self.layer5 = RSBU_NTF(8, 16, kernel_size=3, stride=2)
-        self.layer6 = RSBU_NTF(16, 16, kernel_size=3, stride=1)
+        # RSBU-NTF层 - 增加深度（32层残差收缩单元）
+        # 第1阶段：16通道
+        self.layer1 = RSBU_NTF(16, 16, kernel_size=3, stride=1)
+        self.layer2 = RSBU_NTF(16, 16, kernel_size=3, stride=1)
+        self.layer3 = RSBU_NTF(16, 16, kernel_size=3, stride=1)
+        self.layer4 = RSBU_NTF(16, 16, kernel_size=3, stride=1)
+        
+        # 第2阶段：32通道
+        self.layer5 = RSBU_NTF(16, 32, kernel_size=3, stride=2)
+        self.layer6 = RSBU_NTF(32, 32, kernel_size=3, stride=1)
+        self.layer7 = RSBU_NTF(32, 32, kernel_size=3, stride=1)
+        self.layer8 = RSBU_NTF(32, 32, kernel_size=3, stride=1)
+        
+        # 第3阶段：64通道
+        self.layer9 = RSBU_NTF(32, 64, kernel_size=3, stride=2)
+        self.layer10 = RSBU_NTF(64, 64, kernel_size=3, stride=1)
+        self.layer11 = RSBU_NTF(64, 64, kernel_size=3, stride=1)
+        self.layer12 = RSBU_NTF(64, 64, kernel_size=3, stride=1)
+        
+        # 第4阶段：128通道
+        self.layer13 = RSBU_NTF(64, 128, kernel_size=3, stride=2)
+        self.layer14 = RSBU_NTF(128, 128, kernel_size=3, stride=1)
+        self.layer15 = RSBU_NTF(128, 128, kernel_size=3, stride=1)
+        self.layer16 = RSBU_NTF(128, 128, kernel_size=3, stride=1)
         
         # 全局平均池化
         self.gap = nn.AdaptiveAvgPool2d(1)
         
+        # 添加Dropout层，提高泛化能力
+        self.dropout = nn.Dropout(0.6)  # 增加Dropout概率，提高正则化效果
+        
         # 全连接层
-        self.fc = nn.Linear(16, num_classes)
+        self.fc = nn.Linear(128, num_classes)
     
     def forward(self, x):
         # 输入层
@@ -115,12 +138,26 @@ class DRSN_NTF(nn.Module):
         out = self.layer2(out)
         out = self.layer3(out)
         out = self.layer4(out)
+        
         out = self.layer5(out)
         out = self.layer6(out)
+        out = self.layer7(out)
+        out = self.layer8(out)
+        
+        out = self.layer9(out)
+        out = self.layer10(out)
+        out = self.layer11(out)
+        out = self.layer12(out)
+        
+        out = self.layer13(out)
+        out = self.layer14(out)
+        out = self.layer15(out)
+        out = self.layer16(out)
         
         # 全局平均池化和全连接
         out = self.gap(out)
         out = out.view(out.size(0), -1)
+        out = self.dropout(out)  # 添加Dropout
         out = self.fc(out)
         
         return out
@@ -132,6 +169,7 @@ def test_model():
     y = model(x)
     print(f"输入形状: {x.shape}")
     print(f"输出形状: {y.shape}")
+    print(f"模型参数数量: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
     print("模型测试通过!")
 
 if __name__ == "__main__":
